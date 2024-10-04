@@ -1,0 +1,10 @@
+catkin_pkg
+rospy
+openai
+langchain
+faiss-cpu
+langchain_community
+langchain-openai
+python-dotenv
+jsonschema
+python-dotenv==1.0.1

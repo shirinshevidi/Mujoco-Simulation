@@ -1,0 +1,19 @@
+<mujoco model="MuJoCo Model">
+  <compiler angle="radian"/>
+
+  <worldbody>
+    <geom name="floor" size="5 5 0.1" type="plane" rgba="0.8 0.9 0.8 1"/>
+    <body name="column1" pos="-1 0 1">
+      <joint type="free" limited="false" actuatorfrclimited="false"/>
+      <geom name="column1" size="0.1 0.1 1" type="box" rgba="0.8 0.6 0.4 1"/>
+    </body>
+    <body name="column2" pos="1 0 1">
+      <joint type="free" limited="false" actuatorfrclimited="false"/>
+      <geom name="column2" size="0.1 0.1 1" type="box" rgba="0.8 0.6 0.4 1"/>
+    </body>
+    <body name="beam" pos="0 0 2.1">
+      <joint type="free" limited="false" actuatorfrclimited="false"/>
+      <geom name="beam" size="1.1 0.1 0.1" type="box" rgba="0.8 0.6 0.6 1"/>
+    </body>
+  </worldbody>
+</mujoco>
