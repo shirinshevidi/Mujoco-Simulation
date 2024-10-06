@@ -21,6 +21,103 @@ ORIGINAL_XML_PATH = "portal_frame_original.xml"
 #WORKING_XML_PATH = "portal_frame.xml"
 WORKING_XML_PATH = "mjmodel.xml"
 
+def fix_element_in_simulation(xml_path, element_name):
+    """Fix the specified element in the simulation by removing its freejoint."""
+    tree = ET.parse(xml_path)
+    root = tree.getroot()
+    worldbody = root.find('worldbody')
+    
+    for element in worldbody.findall('body'):
+        if element.get('name') == element_name:
+            joint = element.find('joint')
+            if joint is not None:
+                element.remove(joint)  # Remove the freejoint to fix the element
+                print(f"Fixed element: {element_name}")
+                tree.write(xml_path)
+                return True
+            else:
+                print(f"No freejoint found for element: {element_name}")
+    print(f"Element {element_name} not found in XML.")
+    return False
+
+def re_add_element(xml_path, original_xml_path, element_name):
+    """Re-add the removed element from the original XML."""
+    original_tree = ET.parse(original_xml_path)
+    original_root = original_tree.getroot()
+    original_worldbody = original_root.find('worldbody')
+    
+    tree = ET.parse(xml_path)
+    root = tree.getroot()
+    worldbody = root.find('worldbody')
+    
+    for element in original_worldbody.findall('body'):
+        if element.get('name') == element_name:
+            worldbody.append(element)  # Re-add the element
+            print(f"Re-added element: {element_name}")
+            tree.write(xml_path)
+            return
+
+def ensure_free_joints(xml_path):
+    """Ensure all bodies in the XML have a free joint."""
+    tree = ET.parse(xml_path)
+    root = tree.getroot()
+    worldbody = root.find('worldbody')
+    
+    for element in worldbody.findall('body'):
+        joint = element.find('joint')
+        if joint is None:
+            # Add a free joint if it doesn't exist
+            ET.SubElement(element, 'joint', type='free', limited='false', actuatorfrclimited='false')
+            print(f"Added free joint to body: {element.get('name')}")
+    
+    # Write changes back to the XML file
+    tree.write(xml_path)
+
+def get_bounding_box(pos, size):
+    """Calculate the bounding box for a body given its position and size."""
+    x, y, z = pos
+    sx, sy, sz = size
+    return (x - sx/2, x + sx/2, y - sy/2, y + sy/2, z - sz/2, z + sz/2)
+
+def are_boxes_attached(box1, box2, threshold=0.001):
+    """Determine if two bounding boxes are attached based on a proximity threshold."""
+    x1_min, x1_max, y1_min, y1_max, z1_min, z1_max = box1
+    x2_min, x2_max, y2_min, y2_max, z2_min, z2_max = box2
+
+
+    # Check for overlap or proximity in each dimension
+    x_attached = (x1_min <= x2_max + threshold and x1_max >= x2_min - threshold)
+    y_attached = (y1_min <= y2_max + threshold and y1_max >= y2_min - threshold)
+    z_attached = (z1_min <= z2_max + threshold and z1_max >= z2_min - threshold)
+
+    return x_attached and y_attached and z_attached
+
+def find_attached_elements(selected_element, model):
+    """Find elements attached to the selected element."""
+    attached_elements = []
+    try:
+        selected_body = mujoco.mj_name2id(model, mujoco.mjtObj.mjOBJ_BODY, selected_element)
+    except Exception as e:
+        print(f"Error finding body ID for {selected_element}: {e}")
+        return attached_elements
+
+    selected_pos = model.body_pos[selected_body]
+    selected_size = model.geom_size[selected_body]
+    selected_box = get_bounding_box(selected_pos, selected_size)
+
+    for i in range(model.nbody):
+        if i == selected_body:
+            continue
+        body_name = mujoco.mj_id2name(model, mujoco.mjtObj.mjOBJ_BODY, i)
+        body_pos = model.body_pos[i]
+        body_size = model.geom_size[i]
+        body_box = get_bounding_box(body_pos, body_size)
+
+        if are_boxes_attached(selected_box, body_box):
+            attached_elements.append(body_name)
+
+    return attached_elements
+
 def force_exit(signum, frame):
     print("\nForce exiting...")
     os._exit(1)
@@ -41,8 +138,6 @@ def cleanup():
 def load_model(xml_path):
     model = mujoco.MjModel.from_xml_path(xml_path)
     data = mujoco.MjData(model)
-    print("model: ", model)
-    print("data: ", data)
     return model, data
 
 def close_viewer():
@@ -84,7 +179,9 @@ def initialize_positions(model, data):
             initial_positions[i] = data.qpos[7*i:7*i+3].copy()
             print (initial_positions[i])
         else:
-            print(f"Warning: Unable to initialize position for body {i}")
+            #print(f"Warning: Unable to initialize position for body {i}")
+            initial_positions[i] = model.body_pos[i].copy()
+            print (initial_positions[i])
 
 def is_structure_collapsed(model, data, displacement_threshold=0.5, rotation_threshold=0.5, floor_threshold=0.1):
     for i in range(0, model.nbody -1 ):
@@ -119,9 +216,13 @@ def is_structure_collapsed(model, data, displacement_threshold=0.5, rotation_thr
 def reset_xml():
     shutil.copy2(ORIGINAL_XML_PATH, WORKING_XML_PATH)
     print("Reset XML file to original state")
+    destination_path = "mjmodel.xml"
+    shutil.copy2(ORIGINAL_XML_PATH, destination_path)
 
 def run_simulation():
     global STRUCTURE_COLLAPSED, global_viewer, viewer_thread
+    # Ensure all elements have free joints before starting the simulation
+    
 
     def run_viewer(model, data):
         global global_viewer
@@ -133,9 +234,9 @@ def run_simulation():
             
             def align_view():
                 global_viewer.cam.lookat[:] = model.stat.center
-                global_viewer.cam.distance = 10 * model.stat.extent
+                global_viewer.cam.distance = 1 * model.stat.extent  # Increase this value to zoom out
                 global_viewer.cam.azimuth = 90
-                global_viewer.cam.elevation = -20
+                global_viewer.cam.elevation = -40
 
             align_view()  # Initial alignment
             
@@ -168,6 +269,7 @@ def run_simulation():
                 break
 
             if user_input in ["column1", "column2", "beam"]:
+                ensure_free_joints(WORKING_XML_PATH)
                 if remove_element(WORKING_XML_PATH, user_input):
                     print(f"Element {user_input} removed. Restarting simulation...")
                     
@@ -179,6 +281,33 @@ def run_simulation():
                         if is_structure_collapsed(model, data):
                             STRUCTURE_COLLAPSED = True
                             print("Log: collapsed: true")
+                            attached_elements = find_attached_elements(user_input, model)
+                            print(f"Attached elements: {attached_elements}")
+                            
+                            
+                            if len(attached_elements) == 1:                               
+                                attached_element = attached_elements[0]
+                                if fix_element_in_simulation(WORKING_XML_PATH, attached_element):
+                                    print(f"Element {attached_element} is now fixed.")
+                                
+                                #if re_add_element(WORKING_XML_PATH, ORIGINAL_XML_PATH, user_input):
+                                    #print(f"Element {user_input} re-added to the simulation.")
+                               # Reload the model and re-run the simulation steps
+                                model, data = load_model(WORKING_XML_PATH)
+                                initialize_positions(model, data)
+                                STRUCTURE_COLLAPSED = False
+                                for _ in range(500):
+                                   mujoco.mj_step(model, data)
+                                   if is_structure_collapsed(model, data):
+                                    break
+                                time.sleep(0.01)    
+                                    
+                                if not STRUCTURE_COLLAPSED:
+                                    print(f"Log: Supporting: {attached_element}")
+                                    print(f"supporting {attached_element} allows removing {user_input}")
+                                #ensure_free_joints(WORKING_XML_PATH)
+
+
                             break
                         time.sleep(0.01)
                     
